@@ -1,0 +1,13 @@
+# generated using pipreqs package
+numpy>=1.17.3
+plotly>=4.14.3
+matplotlib>=3.3.3
+pyodbc>=4.0.30
+scipy>=1.1.0
+openpyxl>=3.0.7
+pathos>=0.2.8
+ipython>=7.9.0
+pandas>=1.3.2
+Pillow>=8.3.1
+scikit_learn>=0.24.2
+Dill
