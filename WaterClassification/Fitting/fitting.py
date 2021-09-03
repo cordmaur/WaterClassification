@@ -651,7 +651,7 @@ class GroupFit:
             self[group].best_fit.plot_fit(fig=fig, position=(row+2, 1), **kwargs)
 
             # Plot the metric decay
-            # self[group].plot_metric(max_n=max_n, fig=fig, position=(row+1, 2))
+            # self[group].plot_metric(max_n=max_n, fig=fig, position=(row+2, 1))
             self[group].best_fit.plot_pred_vs_targ(fig=fig, position=(row+2, 2), log_x=True, log_y=True, **kwargs)
 
         # update the final layout

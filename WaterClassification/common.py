@@ -5,8 +5,11 @@ import dill
 import sys
 import io
 import plotly.io as pio
+import plotly.graph_objects as go
 from IPython.core.display import display, HTML
 from PIL import Image
+import matplotlib
+import pandas as pd
 
 
 # basic functions/definitions to be loaded when importing *
@@ -159,6 +162,79 @@ def superpose_figs(figs, trace_names=None):
             trace.hovertext = name
             trace.hovertemplate = None
             trace.line = None
+
+    return fig
+
+
+def plot_reflectances(df, bands, color=None, hover_vars=None, colormap='viridis', log_color=True,
+                      colorbar=True, show_legend=False):
+
+    if color is not None:
+        color_series = df[color] if isinstance(color, str) else pd.Series(color.astype('int'), index=df.index)
+
+        min_color = color_series[color_series > 0].min()
+        max_color = color_series.max()
+
+        cmap = matplotlib.cm.get_cmap(colormap)
+        norm = matplotlib.colors.LogNorm(min_color, max_color) if log_color else matplotlib.colors.Normalize(min_color, max_color)
+    else:
+        min_color = None
+        max_color = None
+
+    cmap = matplotlib.cm.get_cmap(colormap)
+
+    scatters = []
+    for idx in df.index:
+        row = df.loc[idx]
+        reflectances = row[bands]
+        x = reflectances.index
+        y = reflectances.values
+
+        color_value = f'rgb{cmap(norm(color_series.loc[idx]))[:3]}' if color is not None else 'grey'
+
+        hover_text = f'Idx: {idx}'
+        for var in listify(hover_vars):
+            hover_text += f'{var}: {row[var]}<br>'
+
+        scatters.append(go.Scatter(x=x.astype('float'), y=y,
+                                   text=hover_text,
+                                   name='', #str(idx),
+                                   line=dict(width=0.5,
+                                   color=color_value),
+                                   showlegend=show_legend
+                                   ))
+
+    fig = go.Figure(data=scatters)
+    # create the colorbar
+    if colorbar and color is not None:
+        colorbar_trace = go.Scatter(x=[None],
+                                    y=[None],
+                                    mode='markers',
+                                    marker=dict(
+                                        colorscale=colormap,
+                                        showscale=True,
+                                        cmin=min_color,
+                                        cmax=max_color,
+                                        colorbar=dict(xanchor="left", title='', thickness=30,
+                                                      tickvals=[min_color, (min_color + max_color) / 2, max_color],
+                                                      ticktext=[min_color, (min_color + max_color) / 2, max_color],
+                                                      len=1, y=0.5
+                                                      ),
+                                    ),
+                                    hoverinfo='none'
+                                    )
+
+        fig.add_trace(colorbar_trace)
+
+    fig.update_layout(
+        showlegend=True,
+        title="Measurements (full spectra)",
+        xaxis_title="Wavelength (nm)",
+        yaxis_title="Reflectance - Rrs (sr^-1)",
+        font=dict(
+            family="Courier New, monospace",
+            size=12,
+            color="RebeccaPurple"))
 
     return fig
 
