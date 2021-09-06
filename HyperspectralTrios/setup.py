@@ -8,7 +8,6 @@ setuptools.setup(
     python_requires=">=3.6",
     install_requires=[
         'numpy>=1.17',
-        'matplotlib>=3.3',
         'pandas>=0.24',
         'pyodbc>=4.0',
         'openpyxl==3.0.7',
