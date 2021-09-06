@@ -3,11 +3,13 @@ import pandas as pd
 import numpy as np
 import math
 from .common import from_excel_date, plot_reflectances, apply_subplot, create_interpolated_columns, \
-    listify, to_excel_date
+    listify, to_excel_date, plot_mean_std_traces
 
 import configparser
 from plotly import subplots
-from datetime import datetime, timedelta
+import plotly.io as pio
+
+from datetime import timedelta
 import shutil
 
 
@@ -222,7 +224,7 @@ class Radiometry:
                 return radiances[r_type]
 
     # ##########  PLOTTING METHODS  #############
-    def plot_radiometry(self, r_type='Rrs', use_subset=True, interpolated=True, mean=False, **kwargs):
+    def plot_radiometry(self, r_type='Rrs', use_subset=True, interpolated=True, mean=False, std_delta=1., **kwargs):
         subset = self.subset if use_subset else None
 
         # get the radiometry DataFrame
@@ -233,7 +235,15 @@ class Radiometry:
 
         numeric_columns = df._get_numeric_data().columns
 
-        fig = plot_reflectances(df, numeric_columns, color=df.index, colorbar=False)
+        color = df.index if not mean else None
+
+        fig = plot_reflectances(df, numeric_columns, color=color, colorbar=False)
+
+        # if mean, get the figure with mean and standard deviation
+        if mean:
+            mean_traces = plot_mean_std_traces(df, numeric_columns, shaded=True, std_delta=std_delta)
+            for trace in mean_traces:
+                fig.add_trace(trace)
 
         if r_type in self.labels:
             fig.update_layout(title=self.labels[r_type]['title'],
@@ -396,30 +406,31 @@ class Radiometry:
         # save to csv
         rd.to_csv(fn, sep=sep)
 
-    def save_radiometry(self, r_type, subset=True, save_interpolated=True, save_backup=True, sep=';'):
+    def save_radiometry(self, r_type, use_subset=True, save_interpolated=True, save_backup=True, sep=';'):
 
         if r_type in self.radiances:
-            self._save_radiance(r_type, use_subset=subset, save_backup=save_backup)
+            self._save_radiance(r_type, use_subset=use_subset, save_backup=save_backup)
 
         if save_interpolated and r_type in self.interp_radiances:
-            self._save_interpolated_radiance(r_type, use_subset=subset, save_backup=save_backup, sep=sep)
+            self._save_interpolated_radiance(r_type, use_subset=use_subset, save_backup=save_backup, sep=sep)
 
-    def save_radiometries(self, subset=True, save_interpolated=True, save_backup=True, sep=';'):
+    def save_radiometries(self, use_subset=True, save_interpolated=True, save_backup=True, sep=';'):
 
         # get the r_types to be saved (everything)
         r_types = set().union(self.radiances.keys(), self.interp_radiances.keys())
 
         for r_type in r_types:
-            self.save_radiometry(r_type, subset=subset, save_interpolated=save_interpolated,
+            self.save_radiometry(r_type, use_subset=use_subset, save_interpolated=save_interpolated,
                                  save_backup=save_backup, sep=sep)
 
-    def save_radiometries_graph(self, folder, subset=True, mean=False, **kwargs):
+    def save_radiometries_graph(self, folder=None, use_subset=True, mean=False, **kwargs):
         folder = Path(folder) if folder is not None else self.folder
-        fig = self.plot_radiometries(subset=subset, mean=mean, **kwargs)
-        area, location, measurement = self.get_area_location_measurement()
-        fn = '_'.join([area, location, measurement]) + '.png'
+        fig = self.plot_radiometries(use_subset=use_subset, mean=mean, **kwargs)
 
-        pio.write_image(fig, str(folder/fn), width=2000, height=1200, validate=False, engine='kaleido')
+        fn = f'Fig_{self.folder.stem}.png'
+
+        print(f'Saving image {fn} into: {folder}')
+        pio.write_image(fig, str(folder/fn), width=2000, height=1200, validate=False)#, engine='kaleido')
 
     # ##########  SPECIAL METHODS  #############
     def __getitem__(self, r_type):

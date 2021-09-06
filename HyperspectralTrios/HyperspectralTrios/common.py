@@ -138,6 +138,37 @@ def plot_reflectances(df, bands, color=None, hover_vars=None, colormap='viridis'
     return fig
 
 
+def plot_mean_std_traces(df, wls, std_delta=1., opacity=0.2, shaded=True, showlegend=False):
+
+    mean = df[wls].mean()
+
+    if shaded:
+        std = df[wls].std()
+        upper = mean + std*std_delta
+        lower = mean - std*std_delta
+    else:
+        upper = lower = None
+
+    traces = []
+
+    transparent_color = f'rgba(150, 50, 50, {opacity})'
+    if shaded:
+        traces.append(go.Scatter(x=wls, y=upper, showlegend=showlegend, mode=None,
+                                 line=dict(width=2, color='black', dash='dot'),
+                                 name=f'upper ({std_delta} std)'
+                                 ))
+        traces.append(go.Scatter(x=wls, y=lower, fill='tonexty', showlegend=showlegend, mode=None,
+                                 fillcolor=transparent_color,
+                                 line=dict(width=2, color='black', dash='dot'),
+                                 name=f'lower (-{std_delta} std)'
+                                 ))
+
+    traces.append(go.Scatter(x=wls, y=mean, name=f'Mean', line_color='red',
+                             showlegend=showlegend))
+
+    return traces
+
+
 # ------------------- INTERPOLATION ------------------
 def convert_columns_titles_types(df, data_type=float):
     """Change the columns titles names to a numerical format to interpolate the values accordingly"""
