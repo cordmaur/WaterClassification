@@ -4,7 +4,17 @@ setuptools.setup(
     name='HyperspectralTrios',
     version='0.0.1',
     # packages=setuptools.find_packages()
-    packages=['HyperspectralTrios']
+    packages=['HyperspectralTrios'],
+    python_requires=">=3.6",
+    install_requires=[
+        'numpy>=1.17',
+        'matplotlib>=3.3',
+        'pandas>=0.24',
+        'pyodbc>=4.0',
+        'openpyxl==3.0.7',
+        'plotly>=4.10',
+        'jupyterlab'
+    ]
 )
 
 # with open("README.md", "r", encoding="utf-8") as fh:
