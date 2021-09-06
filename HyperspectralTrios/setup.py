@@ -12,7 +12,10 @@ setuptools.setup(
         'pyodbc>=4.0',
         'openpyxl==3.0.7',
         'plotly>=4.10',
-        'jupyterlab'
+        'jupyterlab',
+        'matplotlib>=3',
+        'kaleido',
+        'Pillow'
     ]
 )
 
