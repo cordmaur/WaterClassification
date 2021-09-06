@@ -162,11 +162,12 @@ def plot_reflectances(df, bands, color=None, hover_vars=None, colormap='viridis'
         for var in listify(hover_vars):
             hover_text += f'{var}: {row[var]}<br>'
 
+        color_value = get_color('Viridis', cs.loc[idx]) if cs is not None else 'gray'
 
         scatters.append(go.Scatter(x=x.astype('float'), y=y,
                                    text=hover_text,
                                    name='', #str(idx),
-                                   line=dict(width=0.5, color=f"{get_color('Viridis', cs.loc[idx])}"),
+                                   line=dict(width=0.5, color=color_value),
                                    # color=color_value),
                                    showlegend=show_legend
                                    ))
