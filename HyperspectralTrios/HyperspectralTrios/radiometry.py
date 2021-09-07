@@ -1,12 +1,19 @@
+from functools import partial
 from pathlib import Path
 import pandas as pd
 import numpy as np
 import math
-from .common import from_excel_date, plot_reflectances, apply_subplot, create_interpolated_columns, \
-    listify, to_excel_date, plot_mean_std_traces
+
+import plotly.express as px
+
+from HyperspectralTrios.common import get_color, hex_to_rgb
+from pandas.core.dtypes.common import is_numeric_dtype
+
+from .common import from_excel_date, apply_subplot, create_interpolated_columns, \
+    listify, to_excel_date, plot_mean_std_traces, get_file_by_suffix, check_file
 
 import configparser
-from plotly import subplots
+from plotly import subplots, graph_objects as go
 import plotly.io as pio
 
 from datetime import timedelta
@@ -24,16 +31,25 @@ class BaseRadiometry:
             print(f'File {fn} does not exists to be backed up')
 
     @staticmethod
-    def check_file(path, file_name):
-        """Check if a file exists in the given path"""
-        path = Path(path)
+    def get_radiometry_date(d, dt_type='start', source='txt', base_name='Ed spectrum LO', **kwargs):
+        if source == 'txt':
+            f = get_file_by_suffix(d, base_name, suffixes=['.txt', '.mlb'])
+            if f is not None:
+                rdmtry, _ = rdmtry, meta = BaseRadiometry.open_trios_radiometry(f)
+            else:
+                return None
 
-        if path.exists():
-            for f in path.iterdir():
-                if file_name in f.name:
-                    return f
+            # get the first cell (first date) or the last if end date
+            return rdmtry.iloc[0, 0] if dt_type == 'start' else rdmtry.iloc[-1, 0]
+        else:
+            print(f"Function get_date only supports .txt source, but {source} found")
 
-        return False
+    @staticmethod
+    def get_number_measurements(d, rdmtry_type='Ed', base_name='spectrum LO', sep=' '):
+        f = get_file_by_suffix(d, rdmtry_type + sep + base_name)
+        rdmtry, _ = BaseRadiometry.open_trios_radiometry(f)
+
+        return len(rdmtry)
 
     @staticmethod
     def get_file_by_suffix(path, stem, suffixes=None):
@@ -42,7 +58,7 @@ class BaseRadiometry:
             suffixes = ['.txt', '.mlb']
 
         for suffix in suffixes:
-            f = BaseRadiometry.check_file(path, stem + suffix)
+            f = check_file(path, stem + suffix)
             if f:
                 return f
 
@@ -101,10 +117,192 @@ class BaseRadiometry:
                 radiances.update({prefix: rdmtry})
                 metadatas.update({prefix: meta})
             else:
-                print(f'{prefix}:Raw not found in {folder}')
+                # print(f'{prefix}:Raw not found in {folder}')
+                pass
 
         return radiances, metadatas
 
+    @staticmethod
+    def calc_area(df, bands=None, col_name="area", norm_band=None):
+        """Calc the integral of the curve and adds it to a new column.
+        norm_band: the normalization band reflectance will be used to subtract the curve
+        """
+        bands = df.columns[df.columns.str.isdigit()] if bands is None else bands
+
+        values = df.fillna(0)[bands].to_numpy()
+
+        if norm_band is not None:
+            norm_vector = df.fillna(0)[norm_band].to_numpy()
+            values = values - norm_vector[..., None]
+
+        df[col_name] = np.trapz(values)
+        return df
+
+    @staticmethod
+    def normalize(df, bands=None, inplace=False, add_columns=False):
+        """Normalize the reflectance spectra by dividing all reflectance values by the area under the curve.
+        All normalized spectra will have area=1.
+        add_columns will add the normalized columns to the data frame"""
+
+        bands = df.columns[df.columns.str.isdigit()] if bands is None else bands
+
+        if 'area' not in df.columns:
+            BaseRadiometry.calc_area(df, bands)
+
+        df_norm = df if inplace else df.copy()
+
+        # if add_columns, we will append new columns to the dataframe (inplace or new dataframe)
+        new_bands = [f'n{b}' for b in bands] if add_columns else bands
+
+        df_norm[new_bands] = df[bands]/df.area.to_numpy()[..., None]
+
+        return df_norm
+
+    @staticmethod
+    def plot_reflectances(df, bands, color=None, hover_vars=None, colormap='viridis', log_color=True,
+                          colorbar=False, show_legend=False, discrete=True, line_width=1):
+        """
+        Plot radiometry curves given a dataframe and the bands (columns).
+        :param df: Dataframe with the values
+        :param bands: Columns that indicate the wavelenght (X axis)
+        :param color: column name or a list of values.
+        :param hover_vars:
+        :param colormap:
+        :param log_color:
+        :param colorbar:
+        :param show_legend:
+        :param discrete: If true, force the use of discreet (not continuous).
+        :param line_width:
+        :return: A Plotly figure
+        """
+
+        # if None has been passed, use gray as color
+        if color is None:
+            cs = pd.Series('gray', index=df.index)
+
+        # otherwise, create a color series based on a column or a list-like
+        else:
+            cs = df[color] if isinstance(color, str) else pd.Series(color, index=df.index)
+
+            # if the color is numeric, we will use a continuous colorscale
+            if is_numeric_dtype(cs) and not discrete:
+                cs = (cs - cs.min()) / (cs - cs.min()).max()
+                cs = cs.map(partial(get_color, colorscale_name='Viridis'))
+
+            # otherwise, pass None
+            else:
+                cs = pd.Series([None] * len(df), index=df.index)
+
+        scatters = []
+        for idx in df.index:
+            row = df.loc[idx]
+            reflectances = row[bands]
+            x = reflectances.index
+            y = reflectances.values
+
+            hover_text = f'Idx: {idx}<br>'
+            for var in listify(hover_vars):
+                hover_text += f'{var}: {row[var]}<br>'
+
+            scatters.append(go.Scatter(x=x.astype('float'), y=y,
+                                       text=hover_text,
+                                       name=str(idx),
+                                       line=dict(width=line_width, color=cs[idx]),
+                                       showlegend=show_legend
+                                       ))
+
+        fig = go.Figure(data=scatters)
+
+        # create the colorbar
+        if colorbar and color is not None:
+            colorbar_trace = go.Scatter(x=[None],
+                                        y=[None],
+                                        mode='markers',
+                                        marker=dict(
+                                            colorscale=colormap,
+                                            showscale=True,
+                                            cmin=0,
+                                            cmax=1,
+                                            colorbar=dict(xanchor="left", title='', thickness=30,
+                                                          tickvals=[0, (0 + 1) / 2, 1],
+                                                          ticktext=[0, (0 + 1) / 2, 1],
+                                                          len=1, y=0.5
+                                                          ),
+                                        ),
+                                        hoverinfo='none'
+                                        )
+
+            fig.add_trace(colorbar_trace)
+
+        fig.update_layout(
+            showlegend=True,
+            title="Full spectra",
+            xaxis_title="Wavelength (nm)",
+            yaxis_title="Radiometry",
+            font=dict(
+                family="Courier New, monospace",
+                size=12,
+                color="RebeccaPurple"))
+
+        return fig
+
+    @staticmethod
+    def plot_mean_reflectances(df, group_column, wls, std_delta=1., opacity=0.2, shaded=True, showlegend=True):
+
+        colors = px.colors.qualitative.Plotly + px.colors.qualitative.Light24
+
+        groups = df[group_column].unique()
+        groups.sort()
+
+        mean = df.groupby(by=group_column)[wls].mean()
+
+        if shaded:
+            std = df.groupby(by=group_column)[wls].std()
+            upper = mean + std*std_delta
+            lower = mean - std*std_delta
+        else:
+            upper = lower = None
+
+        fig = go.Figure()
+
+        for color_idx, group in enumerate(groups):
+            y = mean.loc[group]
+            fig.add_trace(go.Scatter(x=wls, y=y, name=f'Cluster {group}', line_color=colors[color_idx],
+                                     showlegend=showlegend))
+
+            transparent_color = f"rgba{(*hex_to_rgb(colors[color_idx]), opacity)}"
+            if shaded:
+                y_up = upper.loc[group]
+                y_low = lower.loc[group]
+                fig.add_trace(go.Scatter(x=wls, y=y_up, showlegend=False, mode=None,
+                                         fillcolor=transparent_color,
+                                         line=dict(width=0.1, color=transparent_color)
+                                         ))
+                fig.add_trace(go.Scatter(x=wls, y=y_low, fill='tonexty', showlegend=False, mode=None,
+                                         fillcolor=transparent_color,
+                                         line=dict(width=0.1, color=transparent_color)))
+
+        fig.update_xaxes(title='Wavelength (nm)')
+        fig.update_yaxes(title='Reflectance (Rrs)')
+        return fig
+
+    @staticmethod
+    def calc_df_grouped_stats(df, groupby, variables, nameslist, funcslist):
+        "Calculate the statistics of a dataframe, grouped by a field, given a list of variables and aggregate \nfunctions"
+        stats = pd.DataFrame()
+
+        # convert variables to a list
+        variables = [variables] if isinstance(variables, str) else variables
+
+        # loop through the desired statistics
+        for name, func in zip(nameslist, funcslist):
+
+            # create the renaming dictionary
+            renaming = {var:f'{var}_{name}' for var in variables}
+
+            stats = pd.concat([stats, func(df.groupby(by=groupby)[variables]).rename(columns=renaming)], axis=1)
+
+        return stats
 
 # #############  Radiometry Class  ##################
 class Radiometry:
@@ -237,7 +435,7 @@ class Radiometry:
 
         color = df.index if not mean else None
 
-        fig = plot_reflectances(df, numeric_columns, color=color, colorbar=False)
+        fig = BaseRadiometry.plot_reflectances(df, numeric_columns, color=color, colorbar=False)
 
         # if mean, get the figure with mean and standard deviation
         if mean:
@@ -456,4 +654,5 @@ class Radiometry:
         # s += f'Subset: '
         # s += f'{len(self.subset)} items' if isinstance(self.subset, list) else f'{self.subset}'
         return s
+
 

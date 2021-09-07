@@ -23,11 +23,9 @@ import pandas as pd
 import numpy as np
 import math
 
-from scipy.optimize import curve_fit
-from sklearn import decomposition, datasets, cluster
+from sklearn import decomposition, cluster
 
 from IPython.core.display import display, HTML
-import pdb
 
 # Cell
 s2bands = ['443', '490', '560', '665', '705', '740', '783', '842', '865', '940']
@@ -514,24 +512,6 @@ def clusterize(df, columns, inf_columns=None, n_clusters=2, cluster_column='clus
                            axis=1)
 
     return cluster_df
-
-
-def calc_df_grouped_stats(df, groupby, variables, nameslist, funcslist):
-    "Calculate the statistics of a dataframe, grouped by a field, given a list of variables and aggregate \nfunctions"
-    stats = pd.DataFrame()
-
-    # convert variables to a list
-    variables = [variables] if isinstance(variables, str) else variables
-
-    # loop through the desired statistics
-    for name, func in zip(nameslist, funcslist):
-
-        # create the renaming dictionary
-        renaming = {var:f'{var}_{name}' for var in variables}
-
-        stats = pd.concat([stats, func(df.groupby(by=groupby)[variables]).rename(columns=renaming)], axis=1)
-
-    return stats
 
 
 # def nir_red_ratio(x, a, b):

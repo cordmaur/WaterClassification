@@ -4,7 +4,8 @@ import pandas as pd
 from io import StringIO
 from datetime import timedelta
 import numpy as np
-from .common import plot_reflectances, apply_subplot, to_excel_date
+from .common import apply_subplot, to_excel_date
+from .radiometry import BaseRadiometry
 from plotly import subplots
 import math
 
@@ -465,7 +466,7 @@ class TriosMDB:
         wls = np.array(numeric_columns)
         wls = wls[(wls > min_wl) & (wls < max_wl)]
 
-        fig = plot_reflectances(self[name], wls, color=self[name].index, colorbar=False)
+        fig = BaseRadiometry.plot_reflectances(self[name], wls, color=self[name].index, colorbar=False)
 
         fig.update_layout(
             showlegend=True,

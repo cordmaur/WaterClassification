@@ -280,9 +280,6 @@ class ClusteringEngine:
 
         fig = go.Figure()
 
-        # convert the wls in numeric (if possible)
-        # wls = [int(wl) for wl in wls]
-
         for c in clusters:
             y = mean.loc[c]
             fig.add_trace(go.Scatter(x=wls, y=y, name=f'Cluster {c}', line_color=colors[c],

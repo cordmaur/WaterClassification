@@ -3,9 +3,29 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.colors
 from PIL import ImageColor
-
+from pathlib import Path
+import shutil
 from datetime import datetime, timedelta
 import math
+
+# #######################  BASIC DEFINITIONS  #######################
+s2bands = ['443', '490', '560', '665', '705', '740', '783', '842', '865', '940']
+s2bands_norm = [f'n{b}' for b in s2bands]
+
+# S3 bands
+s3bands = ['400', '412', '442', '490', '510', '560', '620', '665', '674', '681', '709', '754', '761', '764',
+           '767', '779', '865', '885', '900', '940']
+s3bands_norm = [f'n{b}' for b in s3bands]
+
+
+def wavelength_range(ini_wl, last_wl, step=1, prefix=''):
+    """Creates a range of wavelengths from initial to last, in a defined nanometers step."""
+    return [f'{prefix}{wl}' for wl in range(ini_wl, last_wl + 1, step)]
+
+
+all_wls = wavelength_range(400, 920)
+all_wls_norm = [f'n{b}' for b in all_wls]
+
 
 # #######################  BASIC FUNCTIONS  #######################
 def listify(*args):
@@ -18,6 +38,99 @@ def listify(*args):
     else:
         return tuple(result)
 
+
+def hex_to_rgb(hex_color: str) -> tuple:
+    hex_color = hex_color.lstrip("#")
+    if len(hex_color) == 3:
+        hex_color = hex_color * 2
+    return int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+
+
+# #######################  FILES FUNCTIONS  #######################
+def check_file(path, file_name):
+        """Check if a file exists in the given path"""
+        path = Path(path)
+
+        if path.exists():
+            for f in path.iterdir():
+                if file_name in f.name:
+                    return f
+
+        return False
+
+
+def get_file_datetime(file: Path, ft='%Y-%m-%d %H:%M:%S') -> str:
+    """Get the formatted datetime of a specified file"""
+
+    # if there is a wildcard '*' in the name, search for the first occurence
+    if '*' in file.stem:
+        files = [f for f in file.parent.glob(file.name)]
+        if len(files) > 0:
+            file = files[0]
+        else:
+            return 'Not Found'
+
+    if file.exists():
+        dt = datetime.fromtimestamp(file.stat().st_mtime)
+        return dt.strftime(ft)
+    else:
+        return 'Not Found'
+
+
+def get_file_by_suffix(path, stem, suffixes=None):
+    """Get the file that matches the suffix in the order of preference of suffixes"""
+    if suffixes is None:
+        suffixes = ['.csv', '.txt', '.mlb']
+
+    for suffix in suffixes:
+        f = check_file(path, stem + suffix)
+        if f:
+            return f
+
+    return False
+
+
+def copy_dir(old_dir, new_dir, pattern='*'):
+    old_dir = Path(old_dir)
+    new_dir = Path(new_dir)
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    for old_f in old_dir.glob(pattern):
+        if not old_f.is_dir():
+            new_f = new_dir / old_f.name
+            shutil.copy(old_f, new_f)
+
+
+def match_files_names(files, names_lst):
+    """
+    Given two lists (files and names) check if all the names appear in the files.
+    This function serve to check for the completeness of the directory.
+    """
+    stems = [f.stem for f in files]
+
+    for name in names_lst:
+        if name not in stems:
+            return False
+    return True
+
+
+def get_complete_dirs(base_dir, names_lst):
+    """
+    Go through the subdirectories in base_dir and return those that are completed, that contains all the
+    files in names_lst.
+    """
+    # get all the subdirectories in the base_dir
+    dirs = [d for d in base_dir.rglob("*") if d.is_dir()]
+
+    complete_dirs = []
+    # look for directories that have the "full structure"
+    for d in dirs:
+        files = [f for f in d.iterdir() if not f.is_dir()]
+
+        if match_files_names(files, names_lst):
+            complete_dirs.append(d)
+
+    return complete_dirs
 
 # #######################  Date Time Conversion Functions   #######################
 def from_excel_date(ordinal, epoch=datetime(1900, 1, 1)):
@@ -38,7 +151,7 @@ def to_excel_date(dt, epoch=datetime(1900, 1, 1)):
 
 
 # #######################  COLOR FUNCTIONS  #######################
-def get_color(colorscale_name, loc):
+def get_color(loc, colorscale_name):
     from _plotly_utils.basevalidators import ColorscaleValidator
     # first parameter: Name of the property being validated
     # second parameter: a string, doesn't really matter in our use case
@@ -130,79 +243,6 @@ def apply_subplot(fig, subplot, position):
         for param in ['title', 'type']:
             update_dic.update({param: subplot.layout[axis][param]})
         update_ax_func(update_dic, row=position[0], col=position[1])
-
-    return fig
-
-
-def plot_reflectances(df, bands, color=None, hover_vars=None, colormap='viridis', log_color=True,
-                      colorbar=True, show_legend=False):
-
-    if color is not None:
-        cs = df[color] if isinstance(color, str) else pd.Series(color.astype('int'), index=df.index)
-        cs = (cs - cs.min())/(cs - cs.min()).max()
-
-        min_color = cs[cs > 0].min()
-        max_color = cs.max()
-
-    else:
-        min_color = None
-        max_color = None
-        cs = None
-
-    scatters = []
-    for idx in df.index:
-        row = df.loc[idx]
-        reflectances = row[bands]
-        x = reflectances.index
-        y = reflectances.values
-
-        # color_value = f'rgb{cmap(norm(color_series.loc[idx]))[:3]}' if color is not None else 'grey'
-
-        hover_text = f'Idx: {idx}'
-        for var in listify(hover_vars):
-            hover_text += f'{var}: {row[var]}<br>'
-
-        color_value = get_color('Viridis', cs.loc[idx]) if cs is not None else 'gray'
-
-        scatters.append(go.Scatter(x=x.astype('float'), y=y,
-                                   text=hover_text,
-                                   name='', #str(idx),
-                                   line=dict(width=0.5, color=color_value),
-                                   # color=color_value),
-                                   showlegend=show_legend
-                                   ))
-
-    fig = go.Figure(data=scatters)
-    # create the colorbar
-    if colorbar and color is not None:
-        colorbar_trace = go.Scatter(x=[None],
-                                    y=[None],
-                                    mode='markers',
-                                    marker=dict(
-                                        colorscale=colormap,
-                                        showscale=True,
-                                        cmin=min_color,
-                                        cmax=max_color,
-                                        colorbar=dict(xanchor="left", title='', thickness=30,
-                                                      tickvals=[min_color, (min_color + max_color) / 2, max_color],
-                                                      ticktext=[min_color, (min_color + max_color) / 2, max_color],
-                                                      len=1, y=0.5
-                                                      ),
-                                    ),
-                                    hoverinfo='none'
-                                    )
-
-        fig.add_trace(colorbar_trace)
-
-    fig.update_layout(
-        showlegend=True,
-        title="Full spectra",
-        xaxis_title="Wavelength (nm)",
-        yaxis_title="Radiometry",
-        font=dict(
-            family="Courier New, monospace",
-            size=12,
-            color="RebeccaPurple"))
 
     return fig
 

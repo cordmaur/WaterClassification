@@ -13,6 +13,7 @@ setuptools.setup(
         'pandas>=0.25',
         'openpyxl==3.0.7',
         'plotly>=4.10',
+        'dill'
         # 'jupyterlab',
         # 'Pillow'
     ]
