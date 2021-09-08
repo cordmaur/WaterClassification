@@ -14,6 +14,7 @@ setuptools.setup(
         'plotly>=4.10',
         'jupyterlab',
         'matplotlib>=3',
+        'pathos'
         'kaleido',
         'Pillow'
     ]

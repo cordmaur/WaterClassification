@@ -285,8 +285,6 @@ class MultiFit:
 
         self.data = np.delete(data, np.where(to_exclude), axis=0)
 
-        print(f"Data is ready! {len(self.data)} records!")
-
         with PoolManager(n_cpus, pool) as pool_mgr:
             # self.fits = pool_mgr.map(DfFit, data[:, 0], data[:, 1], data[:, 2], data[:, 3], data[:, 4], data[:, 5])
             self.fits = pool_mgr.map(DfFit,
@@ -597,8 +595,13 @@ class GroupFit:
             if multi_fit is not None:
                 self.df.loc[multi_fit.best_fit.get_param('idx'), pred_column] = multi_fit.best_fit.get_param('y_hat')
 
+        # take care of nans
+        df = self.df.dropna(subset=[pred_column, self.variable])
+        if len(df) != len(self.df):
+            print(f'Warning: {len(self.df)-len(df)} NaNs were found in {repr(self)}')
+
         # once we have all these values, let's calculate the metrics
-        results = BaseFit.test_fit(self.df[pred_column], self.df[self.variable], func=None,
+        results = BaseFit.test_fit(df[pred_column], df[self.variable], func=None,
                                    metrics=BaseFit.available_metrics)
         results['qty'] = len(preds)
         results.pop('y_hat', None)
