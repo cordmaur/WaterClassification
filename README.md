@@ -15,7 +15,7 @@ This package is responsible for manipulating hyperspectral radiometry measuremen
 * Reflectance generation (from radiance and irradiance measurements)
 * Input/Output in different formats
 
-## Instalation
+## Installation
 To install the `HyperspectralTrios` package, you should first clone the WaterClassification repository, and then command `pip install`, through the following commands. 
 ```
 git clone https://github.com/cordmaur/WaterClassification.git
