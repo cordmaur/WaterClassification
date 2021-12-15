@@ -203,7 +203,11 @@ class BaseFit:
         metrics = metrics if metrics is not None else BaseFit.available_metrics
 
         # calculate the predictions (or assume they have been passed)
-        y_hat = np.array(x) if func is None else func(np.array(x), *params)
+        if func is None:
+            y_hat = np.array(x)
+        else:
+            x = np.where(x < 0, 0, x)
+            y_hat = func(np.array(x), *params)
 
         # evaluate the metrics
         res = {}
