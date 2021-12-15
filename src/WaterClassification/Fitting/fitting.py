@@ -21,6 +21,8 @@ from scipy.optimize import curve_fit, minimize
 from itertools import product
 from datetime import datetime
 
+import scipy
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -59,7 +61,8 @@ class Fit:
                            'qty': len(x),
                            'optimize_metric': optimize_metric,
                            'x': x,
-                           'y': y}
+                           'y': y,
+                           }
 
         # initialize a log list to keep track of the logging
         self.log = []
@@ -148,6 +151,18 @@ class Fit:
     def get_param(self, param_name, default_value=None):
         return self.fit_params.get(param_name, default_value)
 
+    def test_fit(self, x, y):
+        """Test the fit for new x and y data"""
+        test_params = {'func': self.func,
+                       'qty': len(x),
+                       'optimize+metric': self.fit_params['optimize_metric'],
+                       'x': x,
+                       'y': y}
+
+        test_params.update(BaseFit.test_fit(x, y, self.func, self.fit_params['params'], metrics=self.metrics))
+
+        return test_params
+
     @property
     def is_empty(self):
         return 'params' not in self.fit_params.keys()
@@ -180,18 +195,41 @@ class DfFit(Fit):
 
         self.fit_params.update({'idx': df.index.to_list(), 'band': expr_x, 'variable': expr_y})
 
+    def predict(self, df):
+        """Predict the values given this new dataframe"""
+        x = BaseFit.parse_expr_df(df, self.expr_x)
+        y = BaseFit.parse_expr_df(df, self.expr_y)
+
+        return BaseFit.test_fit(x, y, self.fit_params['func'], self.fit_params['params'])
+
+    def test_fit(self, df):
+        """Test the fit for this new dataset"""
+        x = BaseFit.parse_expr_df(df, self.expr_x)
+        y = BaseFit.parse_expr_df(df, self.expr_y)
+
+        test_params = super().test_fit(x, y)
+        test_params['band'] = self.expr_x
+        return test_params
+
     # ################################  PLOTTING METHODS  #################################
-    def _scatter_plot(self, **kwargs):
+    def _scatter_plot(self, test_df=None, **kwargs):
         """Overrides the original scatter_plot from Fit, to pass the dataframe"""
-        return px.scatter(self.df, x=self.fit_params['x'], y=self.fit_params['y'], **kwargs)
+
+        df = self.df if test_df is None else test_df
+
+        x = BaseFit.parse_expr_df(df, self.expr_x)
+        y = BaseFit.parse_expr_df(df, self.expr_y)
+        return px.scatter(df, x=x, y=y, **kwargs)
 
     def plot_fit(self, new_funcs=None, new_params=None, fig=None, position=(1, 1), update_layout=None,
                  **kwargs):
 
+        df = kwargs['test_df'] if 'test_df' in kwargs else self.df
+
         if 'hover_data' in kwargs:
-            kwargs['hover_data'] = [self.df.index] + common.listify(kwargs['hover_data'])
+            kwargs['hover_data'] = [df.index] + common.listify(kwargs['hover_data'])
         else:
-            kwargs['hover_data'] = [self.df.index]
+            kwargs['hover_data'] = [df.index]
 
         # Use the plot from upper class Fit
         fig = super().plot_fit(position=position, new_funcs=new_funcs, new_params=new_params, fig=fig,
@@ -233,7 +271,7 @@ class DfFit(Fit):
     def y_label(self): return self.expr_y
 
     def __repr__(self):
-        return f'Band {self.expr_x} ' + super().__repr__()
+        return f'DfFit: Band {self.expr_x} ' + super().__repr__()
 
     def __len__(self):
         return len(self.df)
@@ -312,7 +350,7 @@ class MultiFit:
 
         sub_df = df[df[filter_column] == filter_value]
 
-        if len(sub_df) > thresh:
+        if len(sub_df) >= thresh:
             return MultiFit(sub_df, lst_expr_x, funcs, expr_y, metric=metric, n_cpus=n_cpus, pool=pool,
                             metrics=metrics, optimize_metric=optimize_metric)
         else:
@@ -532,14 +570,17 @@ class GroupFit:
         self.funcs = funcs
         self.group_column = group_column
         self.variable = expr_y
-        # self.metric = metric
-        # self.metrics = metrics
 
         self.overall = self.calc_overall_metric()
 
-    def summary(self, params=None):
+    def summary(self, test_df=None, assign_bands=common.s2bands, params=None):
 
+        # get the params to be displayed in the summary
         params = BaseFit.summary_params if params is None else params
+
+        # if test_df is passed, will need to recalculate all the metrics
+        if test_df is not None:
+            return self.calc_test_metric(test_df, assign_bands, params)
 
         # create a dictionary with groups and respective params. If group is none, fill it with NaNs
         results = {group: fit.best_fit.summary(params=params) if fit is not None else {param: None for param in params}
@@ -585,6 +626,44 @@ class GroupFit:
         for mfit in self.group_fits.values():
             mfit.fits = mfit.fits[:max_n]
 
+    def calc_test_metric(self, test_df, assign_bands=common.s2bands, params=None):
+
+        # get the params to be displayed in the summary
+        params = BaseFit.summary_params if params is None else params
+
+        # if the grou column not in test_df, assign it
+        self.assign_membership(test_df, bands=assign_bands)
+
+        # create the name for the predictions column
+        pred_column = self.variable + '_pred'
+
+        # create a variable to store the results
+        result = {}
+
+        # first, we have to loop through the groups
+        for group, multi_fit in self.group_fits.items():
+
+            # assure that the fit for the group exists
+            if multi_fit is None:
+                continue
+
+            # then, we check in the test_df if there are records in this group
+            df = test_df[test_df[self.group_column] == group]
+
+            # if there is at least one item in the resulting dataframe
+            if len(df) > 0:
+                # calculate the prediction for the variable
+                preds = multi_fit.best_fit.predict(df)
+                test_df.loc[df.index, pred_column] = preds['y_hat']
+
+                result[group] = multi_fit.best_fit.test_fit(df)
+
+        result['overall'] = BaseFit.test_fit(test_df[pred_column], test_df['SPM'], func=None, metrics=BaseFit.available_metrics)
+        result['overall'].pop('y_hat', None)
+
+        result_df = pd.DataFrame(result).T
+        return result_df[params]
+
     def calc_overall_metric(self):
         # prepare targets and predictions lists. These values are already saved in each best_fit
         preds, targs, groups = [], [], []
@@ -608,6 +687,43 @@ class GroupFit:
         return results
 
     def group_title(self, group): return 'Group ' + str(group) + ' - ' + self[group].best_fit.title
+
+    def assign_membership(self, df, bands=common.s2bands):
+        """
+        Given a new dataframe - df, fill up the group column with corresponding clusters
+        :param df: new dataframe to be assigned membership
+        :param bands: bands used for testing membership
+        :return: df will be added with a group column.
+        """
+
+        # create the covariance matrix of the bands for each group
+        cov = self.df.groupby(by=self.group_column)[bands].cov()
+
+        # get the mean reflectance for each group
+        mean = self.df.groupby(by=self.group_column)[bands].mean()
+
+        # calculate the distances for each row of df to the clusters
+        # first we will create an empty dataframe
+        distances_df = pd.DataFrame(index=df.index)
+
+        for group in mean.index:
+            # calc the distances to this group
+
+            # First invert the covariance matrix for the group
+            inv_cov = np.linalg.inv(cov.loc[group])
+
+            # Calc Mahalanobis distances
+            distances = df.apply(lambda row: scipy.spatial.distance.mahalanobis(row[bands],
+                                                                                mean.loc[group],
+                                                                                inv_cov),
+                                 axis=1)
+
+            distances_df[group] = distances
+
+        # get the group, by using argmin
+        args = distances_df.to_numpy().argmin(axis=1)
+        groups = list(map(lambda x: distances_df.columns[x], args))
+        df[self.group_column] = groups
 
     # ################################  PLOT METHODS  #################################
     def plot_group(self, group, **kwargs):
@@ -670,11 +786,15 @@ class GroupFit:
         fig.update(layout_coloraxis_showscale=False)
         return fig
 
-    def plot_pred_vs_targ(self, color=None, **kwargs):
+    def plot_pred_vs_targ(self, test_df=None, color=None, title='', **kwargs):
         pred_column = self.variable + '_pred'
         # check if the variables are already in overall, update the metrics
-        if pred_column not in self.df.columns:
-            self.overall = self.calc_overall_metric()
+
+        # get the correct dataframe to plot
+        df = self.df if test_df is None else test_df
+
+        # calculate the overall metric (again)
+        overall = self.calc_test_metric(df)
 
         color = self.group_column if color is None else color
 
@@ -682,16 +802,17 @@ class GroupFit:
         colors = px.colors.qualitative.Plotly + px.colors.qualitative.Light24
         color_discrete_map = {key: colors[i] for i, key in enumerate(self.group_fits.keys())}
 
-        fig = px.scatter(self.df, x=self.variable, y=pred_column, color=color, color_discrete_map=color_discrete_map,
-                         hover_data=[self.df.index, 'Area', 'Station'], **kwargs)
+        fig = px.scatter(df, x=self.variable, y=pred_column, color=color, color_discrete_map=color_discrete_map,
+                         hover_data=[df.index, 'Area', 'Station'], **kwargs)
 
         # trace the y=x line
-        max_value = self.df[[self.variable, pred_column]].max().max()
-        min_value = self.df[[self.variable, pred_column]].min().min()
+        max_value = df[[self.variable, pred_column]].max().max()
+        min_value = df[[self.variable, pred_column]].min().min()
 
         fig.add_trace(go.Scatter(x=[min_value, max_value], y=[min_value, max_value], mode='lines'))
 
-        return fig.update_layout(showlegend=False)
+        title = title + f"<br>R^2={overall[BaseFit.r2]} | RMSLE={overall[BaseFit.rmsle]} | RMSE={overall[BaseFit.rmse]}"
+        return fig.update_layout(title=title, showlegend=False)
 
     def __repr__(self):
         s = f'Grouped fitting with {len(self.group_fits)} groups: {list(self.group_fits.keys())}'

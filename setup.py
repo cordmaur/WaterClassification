@@ -7,6 +7,7 @@ setuptools.setup(
     version='0.0.1',
     # packages=setuptools.find_packages()
     packages=['WaterClassification'],#, WaterClassification.Fitting, WaterClassification.Classification'],
+    package_dir={"": "src"},
     install_requires=[
         'numpy>=1.17',
         'matplotlib>=3.3',

@@ -5,8 +5,9 @@ from sklearn.metrics import r2_score, mean_squared_error, mean_squared_log_error
 
 import plotly
 import plotly.graph_objects as go
+import plotly.express as px
 
-from src.WaterClassification import common
+from WaterClassification import common
 import pandas as pd
 
 import parser
@@ -282,6 +283,28 @@ class BaseFit:
             series = [BaseFit._parse_expr_df(df, e) for e in expr]
             return pd.DataFrame(series).T.to_numpy()
 
+    # #########################  PLOTTING METHODS  #########################
+    @staticmethod
+    def plot_pred_vs_targ(df, y, y_hat, color_group=None, title='', **kwargs):
+
+        # calculate the overall metric (again)
+        overall = BaseFit.test_fit(df[y_hat], df[y])
+
+        # force a color mapping so the cluster 0 has the first color and so on...
+        colors = px.colors.qualitative.Plotly + px.colors.qualitative.Light24
+        color_discrete_map = {key: colors[i] for i, key in enumerate(df[color_group].unique())}
+
+        fig = px.scatter(df, x=y, y=y_hat, color=color_group, color_discrete_map=color_discrete_map,
+                         hover_data=[df.index, 'Area', 'Station'], **kwargs)
+
+        # trace the y=x line
+        max_value = df[[y, y_hat]].max().max()
+        min_value = df[[y, y_hat]].min().min()
+
+        fig.add_trace(go.Scatter(x=[min_value, max_value], y=[min_value, max_value], mode='lines'))
+
+        title = title + f"<br>R^2={overall[BaseFit.r2]} | RMSLE={overall[BaseFit.rmsle]} | RMSE={overall[BaseFit.rmse]}"
+        return fig.update_layout(title=title, showlegend=False)
 
 class PlotFit:
     """

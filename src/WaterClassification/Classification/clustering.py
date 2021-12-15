@@ -7,10 +7,10 @@ import skfuzzy  # for fuzzy c means
 
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, Normalizer, PowerTransformer
 
-from src.WaterClassification.common import listify, apply_subplot, one_hot, superpose_figs, hex_to_rgb, all_wls, \
+from WaterClassification.common import listify, apply_subplot, one_hot, superpose_figs, hex_to_rgb, all_wls, \
     all_wls_norm
-from src.WaterClassification.Fitting import GroupFit, BaseFit
-from src.WaterClassification.Fitting.multiprocessing import PoolManager
+from WaterClassification.Fitting import GroupFit, BaseFit
+from WaterClassification.Fitting.multiprocessing import PoolManager
 from math import ceil
 
 import plotly.express as px
@@ -419,17 +419,17 @@ class MultiClustering:
             'optimize_metric': optimize_metric
         }
 
-    def summary(self):
-        # print(self.cluster_params)
-        # print(self.fit_params)
+    def summary(self, df_test=None):
+        """Return the summary. If df_test is passed, it will recalculate all metrics against the test dataset"""
+
         if self.fit_params:
             params = BaseFit.available_metrics + ['qty']
-            results = {key: clustering.group_fit.summary().loc['overall'][params]
+            results = {key: clustering.group_fit.summary(df_test).loc['overall'][params]
                        for key, clustering in self.clusters.items()}
 
             results = pd.DataFrame(results)
             for key, clustering in self.clusters.items():
-                results.loc['Samples', key] = clustering.list_quantities()
+                results.loc['qty', key] = clustering.list_quantities()
 
             return results
 
