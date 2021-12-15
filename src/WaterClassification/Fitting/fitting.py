@@ -564,6 +564,8 @@ class GroupFit:
 
                 if not ignore_none or (group_fit is not None):
                     self.group_fits[group] = group_fit
+                else:
+                    print(f'Problem fitting group {group}')
 
         self.df = df
         self.bands = bands
@@ -707,7 +709,9 @@ class GroupFit:
         distances_df = pd.DataFrame(index=df.index)
 
         for group in mean.index:
-            # calc the distances to this group
+            # calc the distances to this group, just if the group has a fitting object
+            if group not in self.group_fits:
+                continue
 
             # First invert the covariance matrix for the group
             inv_cov = np.linalg.inv(cov.loc[group])
