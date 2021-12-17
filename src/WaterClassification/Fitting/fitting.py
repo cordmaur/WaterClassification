@@ -17,11 +17,10 @@ from .fitting_core import Metric, Functions, FittingFunction, BaseFit, PlotFit, 
 
 from .. import common
 from scipy.optimize import curve_fit, minimize
+import scipy
 
 from itertools import product
 from datetime import datetime
-
-import scipy
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -628,6 +627,45 @@ class GroupFit:
         for mfit in self.group_fits.values():
             mfit.fits = mfit.fits[:max_n]
 
+    def assign_membership(self, df, bands):
+        """
+        Given a new dataframe - df, fill up the group column with corresponding clusters
+        :param df: new dataframe to be assigned membership
+        :param bands: bands used for testing membership
+        :return: df will be added with a group column.
+        """
+
+        # create the covariance matrix of the bands for each group
+        cov = self.df.groupby(by=self.group_column)[bands].cov()
+
+        # get the mean reflectance for each group
+        mean = self.df.groupby(by=self.group_column)[bands].mean()
+
+        # calculate the distances for each row of df to the clusters
+        # first we will create an empty dataframe
+        distances_df = pd.DataFrame(index=df.index)
+
+        for group in mean.index:
+            # calc the distances to this group, just if the group has a fitting object
+            if group not in self.group_fits:
+                continue
+
+            # First invert the covariance matrix for the group
+            inv_cov = np.linalg.inv(cov.loc[group])
+
+            # Calc Mahalanobis distances
+            distances = df.apply(lambda row: scipy.spatial.distance.mahalanobis(row[bands],
+                                                                                mean.loc[group],
+                                                                                inv_cov),
+                                 axis=1)
+
+            distances_df[group] = distances
+
+        # get the group, by using argmin
+        args = distances_df.to_numpy().argmin(axis=1)
+        clusters = list(map(lambda x: distances_df.columns[x], args))
+        df[f'assigned_{self.group_column}'] = clusters
+
     def calc_test_metric(self, test_df, assign_bands=common.s2bands, params=None):
 
         # get the params to be displayed in the summary
@@ -650,7 +688,7 @@ class GroupFit:
                 continue
 
             # then, we check in the test_df if there are records in this group
-            df = test_df[test_df[self.group_column] == group]
+            df = test_df[test_df[f'assigned_{self.group_column}'] == group]
 
             # if there is at least one item in the resulting dataframe
             if len(df) > 0:
@@ -689,45 +727,6 @@ class GroupFit:
         return results
 
     def group_title(self, group): return 'Group ' + str(group) + ' - ' + self[group].best_fit.title
-
-    def assign_membership(self, df, bands=common.s2bands):
-        """
-        Given a new dataframe - df, fill up the group column with corresponding clusters
-        :param df: new dataframe to be assigned membership
-        :param bands: bands used for testing membership
-        :return: df will be added with a group column.
-        """
-
-        # create the covariance matrix of the bands for each group
-        cov = self.df.groupby(by=self.group_column)[bands].cov()
-
-        # get the mean reflectance for each group
-        mean = self.df.groupby(by=self.group_column)[bands].mean()
-
-        # calculate the distances for each row of df to the clusters
-        # first we will create an empty dataframe
-        distances_df = pd.DataFrame(index=df.index)
-
-        for group in mean.index:
-            # calc the distances to this group, just if the group has a fitting object
-            if group not in self.group_fits:
-                continue
-
-            # First invert the covariance matrix for the group
-            inv_cov = np.linalg.inv(cov.loc[group])
-
-            # Calc Mahalanobis distances
-            distances = df.apply(lambda row: scipy.spatial.distance.mahalanobis(row[bands],
-                                                                                mean.loc[group],
-                                                                                inv_cov),
-                                 axis=1)
-
-            distances_df[group] = distances
-
-        # get the group, by using argmin
-        args = distances_df.to_numpy().argmin(axis=1)
-        groups = list(map(lambda x: distances_df.columns[x], args))
-        df[self.group_column] = groups
 
     # ################################  PLOT METHODS  #################################
     def plot_group(self, group, **kwargs):
@@ -798,9 +797,9 @@ class GroupFit:
         df = self.df if test_df is None else test_df
 
         # calculate the overall metric (again)
-        overall = self.calc_test_metric(df)
+        overall = self.calc_test_metric(df).loc['overall']
 
-        color = self.group_column if color is None else color
+        color = self.variable if color is None else color
 
         # force a color mapping so the cluster 0 has the first color and so on...
         colors = px.colors.qualitative.Plotly + px.colors.qualitative.Light24
@@ -815,7 +814,7 @@ class GroupFit:
 
         fig.add_trace(go.Scatter(x=[min_value, max_value], y=[min_value, max_value], mode='lines'))
 
-        title = title + f"<br>R^2={overall[BaseFit.r2]} | RMSLE={overall[BaseFit.rmsle]} | RMSE={overall[BaseFit.rmse]}"
+        title = title + f"<br>R^2={overall['R^2']} | RMSLE={overall['RMSLE']} | RMSE={overall['RMSE']}"
         return fig.update_layout(title=title, showlegend=False)
 
     def __repr__(self):
@@ -825,233 +824,3 @@ class GroupFit:
     def __getitem__(self, item):
         return self.group_fits[item]
 
-    # def plot_groups(self, rows, cols, groups=None, showlegend=True, base_height=300, **kwargs):
-    #     "Plot several groups at once"
-    #     groups = self.group_fits.keys() if groups is None else groups
-    #
-    #     titles = [f'{group}: ' + self.group_fits[group].get_title(metric=self.metric, criteria=self.criteria) for group in groups]
-    #
-    #     fig = plotly.subplots.make_subplots(rows=rows, cols=cols, subplot_titles=titles)
-    #
-    #     for i, group in enumerate(groups):
-    #         group_plot = self.plot_group(group, **kwargs)
-    #         fig = core.apply_subplot(fig, group_plot, self.plot_position(cols, i))
-    #
-    #     fig.update_layout(showlegend=showlegend, height=base_height*rows)
-    #     fig.update_coloraxes(colorscale='Plasma')
-    #     return fig
-
-    # def get_grouped_results(self):
-    #     "Adds the overall result (considering all points) to the results table."
-    #     results = self.get_results()
-    #     grouped_metric = self.calc_grouped_metric_()
-    #     return results.append(pd.Series({key: grouped_metric[key] for key in ['r2', 'rmse', 'rmsle', 'SSE', 'qty', 'ids']}).rename('Overall'))
-    #
-    # # def calc_grouped_metric_(self):
-    # #     "Calculates the metrics considering all the best fits in the group and return as a dictionary."
-    # #     preds = []
-    # #     targs = []
-    # #     for group_fit in self.group_fits.values():
-    # #         fit = group_fit.get_best_fit_obj(metric=self.metric, criteria=self.criteria)
-    # #         preds = preds + list(fit.fit_params['y_hat'])
-    # #         targs = targs + list(fit.fit_params['y'])
-    # #
-    # #     grouped_metric = Fit.test_fit(preds, targs, func=None)
-    # #     grouped_metric.update({'ids': self.df.index.to_list()})
-    # #     return grouped_metric
-    #
-    # def update_group_column(self, group_column='group'):
-    #     "Updates the group column, considering the group_fits stored"
-    #
-    #     self.group_column = group_column
-    #
-    #     # sets the correct index
-    #     self.df.set_index('Id', inplace=True)
-    #
-    #     for i, group_fit in enumerate(self.group_fits):
-    #         sub_df = self.group_fits[group_fit].df.set_index('Id')
-    #         self.df.loc[sub_df.index, group_column] = str(i)
-    #
-    #     self.df.reset_index(inplace=True)
-    #     return self.df
-
-    # def plot_scatter(self, x='area', y='SPM', update_group_column='group', log_y=True, title='', marker_size=3):
-    #
-    #     if update_group_column: self.update_group_column(update_group_column)
-    #
-    #     title += '<br>' if title != '' else ''
-    #     title += f'Groups: {len(self.group_fits)} | {self.metric}={self.calc_grouped_metric_()[self.metric]:.2f}'
-    #
-    #     fig = px.scatter(self.df, x='area', y='SPM', color=self.df[self.group_column].astype('str'),
-    #                      log_y=log_y, title=title)
-    #
-    #     fig.update_traces(marker=dict(size=marker_size))
-    #     return fig
-
-    # def plot_mean_reflectances(self, update_group_column=None, bands=None, title=''):
-    #
-    #     if update_group_column: self.update_group_column(update_group_column)
-    #
-    #     bands = core.s2bands if bands is None else bands
-    #
-    #     title += '<br>' if title != '' else ''
-    #     title += f'Groups: {len(self.group_fits)} | {self.metric}={self.calc_grouped_metric_()[self.metric]:.2f}'
-    #
-    #     fig = core.plot_mean_reflectances(self.df, group_by=self.group_column,
-    #                                       id_vars=[self.group_column, self.variable, 'area'],
-    #                                       color=self.group_column, bands=bands,
-    #                                       title=title
-    #                                      )
-    #     return fig
-
-# Cell
-# def sorted_k_partitions(seq, k):
-#     """Returns a list of all unique k-partitions of `seq`.
-#
-#     Each partition is a list of parts, and each part is a tuple.
-#
-#     The parts in each individual partition will be sorted in shortlex
-#     order (i.e., by length first, then lexicographically).
-#
-#     The overall list of partitions will then be sorted by the length
-#     of their first part, the length of their second part, ...,
-#     the length of their last part, and then lexicographically.
-#     """
-#     n = len(seq)
-#     groups = []  # a list of lists, currently empty
-#
-#     def generate_partitions(i):
-#         if i >= n:
-#             yield list(map(tuple, groups))
-#         else:
-#             if n - i > k - len(groups):
-#                 for group in groups:
-#                     group.append(seq[i])
-#                     yield from generate_partitions(i + 1)
-#                     group.pop()
-#
-#             if len(groups) < k:
-#                 groups.append([seq[i]])
-#                 yield from generate_partitions(i + 1)
-#                 groups.pop()
-#
-#     result = generate_partitions(0)
-#
-#     # Sort the parts in each partition in shortlex order
-#     result = [sorted(ps, key = lambda p: (len(p), p)) for ps in result]
-#     # Sort partitions by the length of each part, then lexicographically.
-#     result = sorted(result, key = lambda ps: (*map(len, ps), ps))
-#
-#     return result
-#
-#
-# def test_criteria(v1, v2, criteria):
-#     if criteria == 'min':
-#         return v1 < v2
-#     else:
-#         return v1 > v2
-#
-# class ConstrainedGFit(GroupFit):
-#     def __init__(self, df, bands, funcs, group_column, k_partitions, variable='SPM', metric='rmsle', criteria='min', ignore_none=True, thresh=10):
-#
-#         best_value = np.inf if criteria == 'min' else -np.inf
-#         self.partitions = {}
-#
-#         for partition in sorted_k_partitions(df[group_column].unique(), k_partitions):
-#
-#             # Create the Merged_Groups column
-#             self.apply_partition_df(df, group_column, partition)
-#
-#             # Calc the fitting using parent's constructor
-#             super().__init__(df, bands, funcs, 'Merged_Groups', variable, metric, criteria, ignore_none, thresh)
-#
-#             # Test the criteria
-#             metric_value = self.calc_grouped_metric_()[metric]
-#
-#             self.partitions.update({str(partition): metric_value})
-#
-#             if test_criteria(metric_value, best_value, criteria):
-#                 self.best_partition = partition
-#                 best_value = metric_value
-#
-#         self.apply_partition_df(df, group_column, self.best_partition)
-#         super().__init__(df, bands, funcs, 'Merged_Groups', variable, metric, criteria, ignore_none, thresh)
-#
-#     def apply_partition_df(self, df, group_column, partition):
-#
-#         # Reset the names of the merged groups to original groups
-#         df['Merged_Groups'] = df[group_column]
-#
-#         # for each group inside the partition, correct the Merged_Groups names
-#         for group in partition:
-#             merged_group_name = '_'.join([str(g) for g in group])
-#
-#             # for each item in group, set it merged_group_name
-#             for group_item in group: df.loc[df[group_column]==group_item, 'Merged_Groups'] = merged_group_name
-#
-#
-#
-#
-# # Cell
-# def dic_copy(dic_src, skip_keys=[]):
-#     result_dic = {}
-#     for key, item in dic_src.items():
-#         if key not in skip_keys:
-#             result_dic.update({key:item})
-#     return result_dic
-#
-# def split_by_key(gfit, split_key, cluster_bands, cluster_column):
-#     mfit = gfit.group_fits[split_key]
-#
-#     df = core.clusterize(mfit.df, cluster_bands, n_clusters=2, cluster_column=cluster_column)
-#     new_gfit = GroupFit(df, gfit.bands, Fit.available_funcs, cluster_column, variable=gfit.variable,
-#                         metric=gfit.metric, criteria=gfit.criteria)
-#
-#     # create a new dictionary of fits and copy to it the old fits (except the one splitted)
-#     new_fits = dic_copy(gfit.group_fits, skip_keys=[split_key])
-#
-#     # insert into the new dictionary the splitted fits
-#     for i, item in enumerate(new_gfit.group_fits.values()):  new_fits.update({f'{split_key}_{i}': item})
-#
-#     # change the dictionary of the original gfit
-#     gfit.group_fits = new_fits
-#
-#     return gfit
-#
-#
-#
-# def split_GroupFit(base_gfit, cluster_bands, cluster_column):
-#     "Uses the same variable, metric and criteria of original GroupFit"
-#
-#     gfit = GroupFit(base_gfit.df, base_gfit.bands, Fit.available_funcs, base_gfit.group_column,
-#                     base_gfit.variable, base_gfit.metric, base_gfit.criteria, calc=False)
-#
-#     gfit.group_fits = base_gfit.group_fits.copy()
-#
-#     baseline = gfit.calc_grouped_metric_()[gfit.metric]
-#     split_key = list(gfit.group_fits.keys())[0]
-#
-#     print(f'Actual {gfit.metric}={baseline}')
-#
-#     # backup the original gfit dictionary
-#     group_fits_backup = gfit.group_fits.copy()
-#
-#     for key, mfit in group_fits_backup.items():
-#
-#         for bands in [cluster_bands, core.wavelength_range(375, 940, 10)]:
-#             gfit = split_by_key(gfit, key, bands, cluster_column)
-#
-#             # test the metric with this new configuration
-#             metric_value = gfit.calc_grouped_metric_()[gfit.metric]
-#
-#             if test_criteria(metric_value, baseline, gfit.criteria):
-#                 baseline = metric_value
-#                 split_key = key
-#                 split_bands = bands
-#
-#             # restore the original fits
-#             gfit.group_fits = group_fits_backup
-#
-#     print(f'Splitting {split_key}: {gfit.metric}={baseline}')
-#
-#     return split_by_key(gfit, split_key, split_bands, cluster_column)

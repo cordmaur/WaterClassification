@@ -33,3 +33,4 @@ class PoolManager:
             return self.pool.map(func, *args)
         else:
             return list(map(func, *args))
+

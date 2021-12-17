@@ -8,7 +8,7 @@ import skfuzzy  # for fuzzy c means
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, Normalizer, PowerTransformer
 
 from WaterClassification.common import listify, apply_subplot, one_hot, superpose_figs, hex_to_rgb, all_wls, \
-    all_wls_norm
+    all_wls_norm, s2bands
 from WaterClassification.Fitting import GroupFit, BaseFit
 from WaterClassification.Fitting.multiprocessing import PoolManager
 from math import ceil
@@ -16,6 +16,7 @@ from math import ceil
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly import subplots
+import scipy
 
 
 # Wrapper for the fuzzy c means class
@@ -161,6 +162,45 @@ class ClusteringEngine:
 
         return cluster_df, clustering
 
+    def assign_membership(self, df, bands=s2bands):
+        """
+        Given a new dataframe - df, fill up the group column with corresponding clusters
+        :param df: new dataframe to be assigned membership
+        :param bands: bands used for testing membership
+        :return: df will be added with a group column.
+        """
+
+        # create the covariance matrix of the bands for each group
+        cov = self.df.groupby(by=self.cluster_column)[bands].cov()
+
+        # get the mean reflectance for each group
+        mean = self.df.groupby(by=self.cluster_column)[bands].mean()
+
+        # calculate the distances for each row of df to the clusters
+        # first we will create an empty dataframe
+        distances_df = pd.DataFrame(index=df.index)
+
+        for group in mean.index:
+            # calc the distances to this group, just if the group has a fitting object
+            if self.group_fit is not None and group not in self.group_fit.group_fits:
+                continue
+
+            # First invert the covariance matrix for the group
+            inv_cov = np.linalg.inv(cov.loc[group])
+
+            # Calc Mahalanobis distances
+            distances = df.apply(lambda row: scipy.spatial.distance.mahalanobis(row[bands],
+                                                                                mean.loc[group],
+                                                                                inv_cov),
+                                 axis=1)
+
+            distances_df[group] = distances
+
+        # get the group, by using argmin
+        args = distances_df.to_numpy().argmin(axis=1)
+        clusters = list(map(lambda x: distances_df.columns[x], args))
+        df[self.assigned_cluster] = clusters
+
     # ################################  BLENDING ALGO METHODS  #################################
     def calc_all_algos_predictions(self):
         """
@@ -301,18 +341,18 @@ class ClusteringEngine:
         fig.update_yaxes(title='Reflectance (Rrs)')
         return fig
 
-    def plot_box(self):
+    def plot_box(self, variable='SPM'):
         colors = px.colors.qualitative.Plotly + px.colors.qualitative.Light24
 
         clusters = sorted(self.df[self.cluster_column].unique())
 
         fig = go.Figure()
         for c in clusters:
-            box = go.Box(y=self.df[self.df[self.cluster_column] == c][self.group_fit.variable],
+            box = go.Box(y=self.df[self.df[self.cluster_column] == c][variable],
                          name=f'Cluster {c}', line=dict(color=colors[c]))
             fig.add_trace(box)
 
-        fig.update_yaxes(type='log', title=self.group_fit.variable)
+        fig.update_yaxes(type='log', title=variable)
         fig.update_xaxes(title='Cluster')
 
         return fig
@@ -351,6 +391,10 @@ class ClusteringEngine:
 
     def list_quantities(self):
         return self.df[self.cluster_column].value_counts().to_list()
+
+    @property
+    def assigned_cluster(self):
+        return 'assigned_' + self.cluster_column
 
     def __repr__(self):
         s = f'ClusteringEngine with {self.n_clusters} clusters'
@@ -419,12 +463,12 @@ class MultiClustering:
             'optimize_metric': optimize_metric
         }
 
-    def summary(self, df_test=None):
+    def summary(self, df_test=None, assign_bands=s2bands):
         """Return the summary. If df_test is passed, it will recalculate all metrics against the test dataset"""
 
         if self.fit_params:
             params = BaseFit.available_metrics + ['qty']
-            results = {key: clustering.group_fit.summary(df_test).loc['overall'][params]
+            results = {key: clustering.group_fit.summary(df_test, assign_bands).loc['overall'][params]
                        for key, clustering in self.clusters.items()}
 
             results = pd.DataFrame(results)

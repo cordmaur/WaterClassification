@@ -29,8 +29,9 @@ class Metric:
         self.name = name
         self.optimize_criteria = optimize_criteria
 
-    def __call__(self, y, y_hat, decimal=None):
+    def __call__(self, y=None, y_hat=None, decimal=None):
         """Calculate the metric given targets (y) and predictions (y_hat)"""
+
         if self.metric_func:
 
             # given that RMSLE is not suitable for negative targets, we will clip y < 0
@@ -310,10 +311,59 @@ class BaseFit:
         title = title + f"<br>R^2={overall[BaseFit.r2]} | RMSLE={overall[BaseFit.rmsle]} | RMSE={overall[BaseFit.rmse]}"
         return fig.update_layout(title=title, showlegend=False)
 
+
 class PlotFit:
     """
     Holds some general plotting functions that are not instance dependant
     """
+    @staticmethod
+    def plot_mean_reflectances(df, group_by, wls=None, std_delta=1., opacity=0.2, shaded=True, showlegend=True):
+        """Plot the mean reflectances of a given dataframe and a group column"""
+
+        # get the wavelengths to plot
+        wls = common.all_wls if wls is None else wls
+
+        # get a discrete color list (colors will be controlled manually)
+        colors = px.colors.qualitative.Plotly + px.colors.qualitative.Light24
+
+        # get the groups that will be plotted and order them ascending
+        groups = df[group_by].unique()
+        groups.sort()
+
+        # calculate the mean reflectance for each group
+        mean = df.groupby(by=group_by)[wls].mean()
+
+        if shaded:
+            std = df.groupby(by=group_by)[wls].std()
+            upper = mean + std*std_delta
+            lower = mean - std*std_delta
+            # upper = df.groupby(by=group_by)[wls].max()
+            # lower = df.groupby(by=group_by)[wls].min()
+        else:
+            upper = lower = None
+
+        fig = go.Figure()
+
+        for c in groups:
+            y = mean.loc[c]
+            fig.add_trace(go.Scatter(x=wls, y=y, name=f'Cluster {c}', line_color=colors[c],
+                                     showlegend=showlegend))
+
+            transparent_color = f"rgba{(*common.hex_to_rgb(colors[c]), opacity)}"
+            if shaded:
+                y_up = upper.loc[c]
+                y_low = lower.loc[c]
+                fig.add_trace(go.Scatter(x=wls, y=y_up, showlegend=False, mode=None,
+                                         fillcolor=transparent_color,
+                                         line=dict(width=0.1, color=transparent_color)
+                                         ))
+                fig.add_trace(go.Scatter(x=wls, y=y_low, fill='tonexty', showlegend=False, mode=None,
+                                         fillcolor=transparent_color,
+                                         line=dict(width=0.1, color=transparent_color)))
+
+        fig.update_xaxes(title='Wavelength (nm)')
+        fig.update_yaxes(title='Reflectance (Rrs)')
+        return fig
 
     @staticmethod
     def draw_func_trace(func, params, x_interval, pts=100, txt=None):
