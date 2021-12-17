@@ -207,7 +207,7 @@ class BaseFit:
         if func is None:
             y_hat = np.array(x)
         else:
-            x = np.where(x < 0, 0, x)
+            x = np.where(x < 0, 0.1, x)
             y_hat = func(np.array(x), *params)
 
         # evaluate the metrics
