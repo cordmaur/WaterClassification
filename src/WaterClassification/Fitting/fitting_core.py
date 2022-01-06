@@ -317,7 +317,8 @@ class PlotFit:
     Holds some general plotting functions that are not instance dependant
     """
     @staticmethod
-    def plot_mean_reflectances(df, group_by, wls=None, std_delta=1., opacity=0.2, shaded=True, showlegend=True):
+    def plot_mean_reflectances(df, group_by, wls=None, std_delta=1., opacity=0.2, shaded=True, showlegend=True,
+                               **update_layout):
         """Plot the mean reflectances of a given dataframe and a group column"""
 
         # get the wavelengths to plot
@@ -344,12 +345,12 @@ class PlotFit:
 
         fig = go.Figure()
 
-        for c in groups:
+        for i, c in enumerate(groups):
             y = mean.loc[c]
-            fig.add_trace(go.Scatter(x=wls, y=y, name=f'Cluster {c}', line_color=colors[c],
+            fig.add_trace(go.Scatter(x=wls, y=y, name=f'Cluster {c}', line_color=colors[i],
                                      showlegend=showlegend))
 
-            transparent_color = f"rgba{(*common.hex_to_rgb(colors[c]), opacity)}"
+            transparent_color = f"rgba{(*common.hex_to_rgb(colors[i]), opacity)}"
             if shaded:
                 y_up = upper.loc[c]
                 y_low = lower.loc[c]
@@ -363,7 +364,8 @@ class PlotFit:
 
         fig.update_xaxes(title='Wavelength (nm)')
         fig.update_yaxes(title='Reflectance (Rrs)')
-        return fig
+
+        return fig.update_layout(**update_layout)
 
     @staticmethod
     def draw_func_trace(func, params, x_interval, pts=100, txt=None):

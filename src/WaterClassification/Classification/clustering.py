@@ -16,7 +16,8 @@ from math import ceil
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly import subplots
-import scipy
+
+from WaterClassification.Fitting.mahalanobis import assign_membership
 
 
 # Wrapper for the fuzzy c means class
@@ -162,44 +163,28 @@ class ClusteringEngine:
 
         return cluster_df, clustering
 
-    def assign_membership(self, df, bands=s2bands):
+    def assign_membership(self, df, bands, group_name='assigned_group', distance='mahalanobis'):
         """
         Given a new dataframe - df, fill up the group column with corresponding clusters
+        :param distance: Distance algorithm to be used: 'mahalanobis', 'euclidean', 'seuclidean'
+        :param group_name: column name to write the groups to
         :param df: new dataframe to be assigned membership
         :param bands: bands used for testing membership
         :return: df will be added with a group column.
         """
 
-        # create the covariance matrix of the bands for each group
-        cov = self.df.groupby(by=self.cluster_column)[bands].cov()
+        # get the groups to be used in the loop (groups that can receive assignments)
+        groups = None if self.group_fit is None else self.group_fit.group_fits.keys()
 
-        # get the mean reflectance for each group
-        mean = self.df.groupby(by=self.cluster_column)[bands].mean()
+        assign_membership(base_df=self.df,
+                          group_by=self.cluster_column,
+                          new_df=df,
+                          bands=bands,
+                          new_group=group_name,
+                          dist_func=distance,
+                          groups=groups
+                          )
 
-        # calculate the distances for each row of df to the clusters
-        # first we will create an empty dataframe
-        distances_df = pd.DataFrame(index=df.index)
-
-        for group in mean.index:
-            # calc the distances to this group, just if the group has a fitting object
-            if self.group_fit is not None and group not in self.group_fit.group_fits:
-                continue
-
-            # First invert the covariance matrix for the group
-            inv_cov = np.linalg.inv(cov.loc[group])
-
-            # Calc Mahalanobis distances
-            distances = df.apply(lambda row: scipy.spatial.distance.mahalanobis(row[bands],
-                                                                                mean.loc[group],
-                                                                                inv_cov),
-                                 axis=1)
-
-            distances_df[group] = distances
-
-        # get the group, by using argmin
-        args = distances_df.to_numpy().argmin(axis=1)
-        clusters = list(map(lambda x: distances_df.columns[x], args))
-        df[self.assigned_cluster] = clusters
 
     # ################################  BLENDING ALGO METHODS  #################################
     def calc_all_algos_predictions(self):

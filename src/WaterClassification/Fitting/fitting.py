@@ -17,7 +17,6 @@ from .fitting_core import Metric, Functions, FittingFunction, BaseFit, PlotFit, 
 
 from .. import common
 from scipy.optimize import curve_fit, minimize
-import scipy
 
 from itertools import product
 from datetime import datetime
@@ -627,13 +626,18 @@ class GroupFit:
         for mfit in self.group_fits.values():
             mfit.fits = mfit.fits[:max_n]
 
-    def assign_membership(self, df, bands):
+    def assign_membership(self, df, bands, group_name='assigned_group', distance='mahalanobis'):
         """
         Given a new dataframe - df, fill up the group column with corresponding clusters
+        :param distance: Distance algorithm to be used: 'mahalanobis', 'euclidean', 'seuclidean'
+        :param group_name: column name to write the groups to
         :param df: new dataframe to be assigned membership
         :param bands: bands used for testing membership
         :return: df will be added with a group column.
         """
+
+        # calc the variances for each band
+        var = self.df.groupby(by=self.group_column)[bands].var()
 
         # create the covariance matrix of the bands for each group
         cov = self.df.groupby(by=self.group_column)[bands].cov()
@@ -650,29 +654,46 @@ class GroupFit:
             if group not in self.group_fits:
                 continue
 
-            # First invert the covariance matrix for the group
-            inv_cov = np.linalg.inv(cov.loc[group])
+            # calculate the distances according to the distance algorithm
+            if distance == 'mahalanobis':
+                # First invert the covariance matrix for the group
+                inv_cov = np.linalg.inv(cov.loc[group])
 
-            # Calc Mahalanobis distances
-            distances = df.apply(lambda row: scipy.spatial.distance.mahalanobis(row[bands],
-                                                                                mean.loc[group],
-                                                                                inv_cov),
-                                 axis=1)
+                # Calc Mahalanobis distances
+                distances = df.apply(lambda row: scipy.spatial.distance.mahalanobis(row[bands],
+                                                                                    mean.loc[group],
+                                                                                    inv_cov),
+                                     axis=1)
+
+            elif distance == 'euclidean':
+                # Calc euclidean distances
+                distances = df.apply(lambda row: scipy.spatial.distance.euclidean(row[bands],
+                                                                                  mean.loc[group]),
+                                     axis=1)
+
+            elif distance == 'seuclidean':
+                # Calc standardized euclidean distances
+                distances = df.apply(lambda row: scipy.spatial.distance.seuclidean(row[bands],
+                                                                                  mean.loc[group],
+                                                                                  var.loc[group]),
+                                     axis=1)
 
             distances_df[group] = distances
 
         # get the group, by using argmin
         args = distances_df.to_numpy().argmin(axis=1)
         clusters = list(map(lambda x: distances_df.columns[x], args))
-        df[f'assigned_{self.group_column}'] = clusters
+        df[group_name] = clusters
 
-    def calc_test_metric(self, test_df, assign_bands=common.s2bands, params=None):
+    def calc_test_metric(self, test_df, assign_bands=common.s2bands, params=None, group_name='assigned_group',
+                         assign_distance='mahalanobis'):
 
         # get the params to be displayed in the summary
         params = BaseFit.summary_params if params is None else params
 
-        # if the grou column not in test_df, assign it
-        self.assign_membership(test_df, bands=assign_bands)
+        # if the group column not in test_df, assign it
+        if group_name not in test_df.columns:
+            self.assign_membership(test_df, bands=assign_bands, group_name=group_name, distance=assign_distance)
 
         # create the name for the predictions column
         pred_column = self.variable + '_pred'
@@ -688,7 +709,7 @@ class GroupFit:
                 continue
 
             # then, we check in the test_df if there are records in this group
-            df = test_df[test_df[f'assigned_{self.group_column}'] == group]
+            df = test_df[test_df[group_name] == group]
 
             # if there is at least one item in the resulting dataframe
             if len(df) > 0:
@@ -789,7 +810,7 @@ class GroupFit:
         fig.update(layout_coloraxis_showscale=False)
         return fig
 
-    def plot_pred_vs_targ(self, test_df=None, color=None, title='', **kwargs):
+    def plot_pred_vs_targ(self, test_df=None, color=None, title='', group_name='assigned_group', **kwargs):
         pred_column = self.variable + '_pred'
         # check if the variables are already in overall, update the metrics
 
@@ -797,7 +818,7 @@ class GroupFit:
         df = self.df if test_df is None else test_df
 
         # calculate the overall metric (again)
-        overall = self.calc_test_metric(df).loc['overall']
+        overall = self.calc_test_metric(df, group_name=group_name).loc['overall']
 
         color = self.variable if color is None else color
 
