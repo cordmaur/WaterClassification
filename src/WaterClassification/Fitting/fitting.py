@@ -686,7 +686,7 @@ class GroupFit:
         df[group_name] = clusters
 
     def calc_test_metric(self, test_df, assign_bands=common.s2bands, params=None, group_name='assigned_group',
-                         assign_distance='mahalanobis'):
+                         assign_distance='euclidean'):
 
         # get the params to be displayed in the summary
         params = BaseFit.summary_params if params is None else params
